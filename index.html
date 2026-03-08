@@ -133,6 +133,7 @@
         let currentIndex = 0;
         let isPlaying = false;
         let hlsInstance = null;
+        let lastProgressSaveAt = 0;
         let mediaSessionHandlersBound = false;
         const ebookProgressEndpoint = '/api/ebook-progress';
         
@@ -273,11 +274,14 @@
                 if (!Number.isFinite(savedPosition) || savedPosition <= 0) return;
 
                 const applySavedTime = () => {
-                    if (stations[currentIndex] !== station || !Number.isFinite(player.duration) || player.duration <= 0) {
-                        return;
+                    if (stations[currentIndex] !== station) return;
+
+                    let resumeTime = savedPosition;
+                    if (Number.isFinite(player.duration) && player.duration > 0) {
+                        const maxResumeTime = Math.max(player.duration - 1, 0);
+                        resumeTime = Math.min(savedPosition, maxResumeTime);
                     }
-                    const maxResumeTime = Math.max(player.duration - 1, 0);
-                    const resumeTime = Math.min(savedPosition, maxResumeTime);
+
                     if (resumeTime > 0) {
                         player.currentTime = resumeTime;
                         log(`Resumed ${station.name}`);
@@ -289,6 +293,18 @@
             } catch (e) {
                 log("Resume Lookup Failed");
             }
+        }
+
+
+        function persistStationProgress(station) {
+            if (!station || !station.isEbook) return;
+            const position = Number(player.currentTime);
+            if (!Number.isFinite(position) || position <= 0) return;
+
+            const now = Date.now();
+            if (now - lastProgressSaveAt < 2000) return;
+            lastProgressSaveAt = now;
+            saveEbookProgress(station, position);
         }
 
         async function saveEbookProgress(station, position) {
@@ -325,8 +341,17 @@
             else startPlayback();
         }
 
-        function nextStation() { currentIndex = (currentIndex + 1) % stations.length; updateCarousel(); }
-        function prevStation() { currentIndex = (currentIndex - 1 + stations.length) % stations.length; updateCarousel(); }
+        function nextStation() {
+            persistStationProgress(stations[currentIndex]);
+            currentIndex = (currentIndex + 1) % stations.length;
+            updateCarousel();
+        }
+
+        function prevStation() {
+            persistStationProgress(stations[currentIndex]);
+            currentIndex = (currentIndex - 1 + stations.length) % stations.length;
+            updateCarousel();
+        }
 
         function updateCarousel(shouldSync = true) {
             carousel.style.transform = `translateX(-${currentIndex * 100}vw)`;
@@ -384,7 +409,13 @@
 
             player.onwaiting = () => spinner.classList.remove('hidden');
             player.onplaying = () => { log("Live"); spinner.classList.add('hidden'); isPlaying = true; updateUI(); };
-            player.onpause = () => { log("Paused"); spinner.classList.add('hidden'); isPlaying = false; updateUI(); };
+            player.onpause = () => {
+                persistStationProgress(stations[currentIndex]);
+                log("Paused");
+                spinner.classList.add('hidden');
+                isPlaying = false;
+                updateUI();
+            };
             player.onended = () => {
                 const station = stations[currentIndex];
                 const endPosition = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : player.currentTime;
@@ -394,6 +425,9 @@
                 log("Playback Ended");
             };
             player.onerror = () => { log("Stream Error"); spinner.classList.add('hidden'); };
+            player.ontimeupdate = () => persistStationProgress(stations[currentIndex]);
+
+            window.addEventListener('pagehide', () => persistStationProgress(stations[currentIndex]));
 
             document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
         }
