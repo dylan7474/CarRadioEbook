@@ -18,6 +18,7 @@ When deployed with the included `deploy.sh` flow, a lightweight Node server is g
 - serve the static app
 - expose ebook metadata from mounted media folders
 - stream MP3 files (including range request support)
+- store and serve ebook playback position via `/api/ebook-progress` for cross-device resume
 
 ## Basic controls
 
@@ -46,6 +47,7 @@ This project is designed around the provided deployment script.
 - Docker
 - Bash shell environment
 - A local audiobook folder at `~/my_audiobooks` (or edit `EBOOK_DIR_HOST` in `deploy.sh`)
+- A writable progress file path (defaults to `~/.carradio_ebook_progress.json`)
 
 ### Deploy
 ```bash
@@ -57,7 +59,7 @@ Optional custom port:
 ./deploy.sh 3012
 ```
 
-The script will generate runtime files (`server.js`, `Dockerfile`, `.dockerignore`), build an image, and run the container with your audiobook folder mounted read-only.
+The script will generate runtime files (`server.js`, `Dockerfile`, `.dockerignore`), build an image, and run the container with your audiobook folder mounted read-only plus a writable progress JSON file mounted for server-side resume state.
 
 ## Roadmap
 
