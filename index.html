@@ -13,6 +13,7 @@
             background-color: #000; color: white; touch-action: none; 
             font-family: -apple-system, system-ui, sans-serif;
             user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
         
         #station-carousel { 
@@ -51,7 +52,6 @@
             border: none;
             cursor: pointer;
             outline: none;
-            -webkit-tap-highlight-color: transparent;
         }
 
         .status-bar {
@@ -104,7 +104,7 @@
         </div>
 
         <!-- Touch Interaction Layer -->
-        <button class="master-control" onclick="togglePlay()">
+        <button class="master-control" id="master-btn">
             <div id="play-pause-container" class="opacity-10 transition-opacity duration-300">
                 <i data-lucide="play" id="main-icon" style="width: 120px; height: 120px;"></i>
             </div>
@@ -133,6 +133,7 @@
         let currentIndex = 0;
         let isPlaying = false;
         let hlsInstance = null;
+        let mediaSessionHandlersBound = false;
         
         const player = document.getElementById('radio-player');
         const mainIcon = document.getElementById('main-icon');
@@ -142,6 +143,7 @@
         const dotContainer = document.getElementById('dot-container');
         const debugLog = document.getElementById('debug-log');
         const spinner = document.getElementById('loading-spinner');
+        const masterBtn = document.getElementById('master-btn');
 
         function log(msg) {
             debugLog.innerText = msg;
@@ -167,6 +169,7 @@
             } catch (e) { log("Ebook Scan Failed"); }
 
             renderApp();
+            bindEvents();
         }
 
         function renderApp() {
@@ -174,7 +177,6 @@
             dotContainer.innerHTML = '';
             
             stations.forEach((s, i) => {
-                // Page
                 const page = document.createElement('div');
                 page.className = 'station-page';
                 page.innerHTML = `
@@ -183,7 +185,6 @@
                 `;
                 carousel.appendChild(page);
 
-                // Dot
                 const d = document.createElement('div');
                 d.id = 'dot-' + i;
                 d.className = 'dot';
@@ -191,7 +192,7 @@
             });
 
             carousel.style.width = `${stations.length * 100}vw`;
-            updateCarousel();
+            updateCarousel(false);
             lucide.createIcons();
         }
 
@@ -200,16 +201,29 @@
                 const s = stations[currentIndex];
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: s.name,
-                    artist: s.sub,
-                    album: "CarRadio"
+                    artist: "AutoHub Live Radio",
+                    album: "Preset Channel " + (currentIndex + 1)
                 });
                 
-                // Set Handlers
-                navigator.mediaSession.setActionHandler('play', () => togglePlay());
-                navigator.mediaSession.setActionHandler('pause', () => togglePlay());
-                navigator.mediaSession.setActionHandler('previoustrack', () => prevStation());
-                navigator.mediaSession.setActionHandler('nexttrack', () => nextStation());
-                
+                // Restored full set of handlers from the original successfully tested version
+                const handlers = {
+                    play: () => startPlayback(),
+                    pause: () => pausePlayback(),
+                    previoustrack: () => prevStation(),
+                    nexttrack: () => nextStation(),
+                    seekbackward: () => prevStation(),
+                    seekforward: () => nextStation(),
+                    stop: () => pausePlayback()
+                };
+
+                Object.entries(handlers).forEach(([action, handler]) => {
+                    try {
+                        navigator.mediaSession.setActionHandler(action, handler);
+                    } catch (e) {
+                        // Action not supported by this browser/OS
+                    }
+                });
+
                 navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
                 btStatus.innerText = s.name;
                 statusDot.className = "w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]";
@@ -245,59 +259,91 @@
             updateMediaSession();
         }
 
-        function togglePlay() {
-            if (isPlaying) {
-                player.pause();
-                isPlaying = false;
-            } else {
-                if (!player.src || player.src.includes(window.location.hostname)) syncStation();
-                player.play().then(() => { isPlaying = true; updateUI(); }).catch(e => log("Error playing"));
-            }
+        function startPlayback() {
+            if (!player.src || player.src.includes(window.location.hostname)) syncStation();
+            player.play().then(() => { 
+                isPlaying = true; 
+                updateUI(); 
+                if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing";
+            }).catch(e => log("Play Blocked"));
+        }
+
+        function pausePlayback() {
+            player.pause();
+            isPlaying = false;
             updateUI();
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused";
+        }
+
+        function togglePlay() {
+            if (isPlaying) pausePlayback();
+            else startPlayback();
         }
 
         function nextStation() { currentIndex = (currentIndex + 1) % stations.length; updateCarousel(); }
         function prevStation() { currentIndex = (currentIndex - 1 + stations.length) % stations.length; updateCarousel(); }
 
-        function updateCarousel() {
+        function updateCarousel(shouldSync = true) {
             carousel.style.transform = `translateX(-${currentIndex * 100}vw)`;
             stations.forEach((_, i) => {
                 const dot = document.getElementById('dot-' + i);
                 if (dot) dot.className = (i === currentIndex) ? 'dot dot-active' : 'dot';
             });
-            syncStation();
+            if (shouldSync) syncStation();
             updateUI();
         }
 
         function updateUI() {
-            mainIcon.setAttribute('data-lucide', isPlaying ? 'pause' : 'play');
-            lucide.createIcons();
+            const iconName = isPlaying ? 'pause' : 'play';
+            if (mainIcon.getAttribute('data-lucide') !== iconName) {
+                mainIcon.setAttribute('data-lucide', iconName);
+                lucide.createIcons();
+            }
             document.getElementById('play-pause-container').style.opacity = isPlaying ? "0.05" : "0.3";
             document.querySelectorAll('.station-title').forEach((title, i) => {
                 title.classList.toggle('active-glow', isPlaying && i === currentIndex);
             });
-            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
         }
 
-        player.onwaiting = () => spinner.classList.remove('hidden');
-        player.onplaying = () => { log("Live"); spinner.classList.add('hidden'); isPlaying = true; updateUI(); };
-        player.onpause = () => { log("Paused"); spinner.classList.add('hidden'); isPlaying = false; updateUI(); };
-        player.onerror = () => { log("Stream Error"); spinner.classList.add('hidden'); };
+        function bindEvents() {
+            masterBtn.addEventListener('click', (e) => {
+                if (!swipeDetected) togglePlay();
+            });
 
-        // Swipe
-        let startX = 0;
-        document.ontouchstart = e => startX = e.touches[0].clientX;
-        document.ontouchend = e => {
-            const dx = startX - e.changedTouches[0].clientX;
-            if (Math.abs(dx) > 70) { if (dx > 0) nextStation(); else prevStation(); }
-        };
+            let startX = 0;
+            let swipeDetected = false;
 
-        // Keyboard
-        document.onkeydown = e => {
-            if (e.code === 'ArrowRight' || e.code === 'ArrowUp') nextStation();
-            if (e.code === 'ArrowLeft' || e.code === 'ArrowDown') prevStation();
-            if (e.code === 'Space') togglePlay();
-        };
+            document.addEventListener('touchstart', (e) => {
+                startX = e.touches[0].clientX;
+                swipeDetected = false;
+            }, { passive: true });
+
+            document.addEventListener('touchmove', (e) => {
+                const dx = startX - e.touches[0].clientX;
+                if (Math.abs(dx) > 10) swipeDetected = true;
+            }, { passive: true });
+
+            document.addEventListener('touchend', (e) => {
+                const dx = startX - e.changedTouches[0].clientX;
+                if (Math.abs(dx) > 70) { 
+                    swipeDetected = true;
+                    if (dx > 0) nextStation(); else prevStation(); 
+                }
+            }, { passive: true });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'ArrowRight' || e.code === 'ArrowUp' || e.code === 'MediaTrackNext') nextStation();
+                if (e.code === 'ArrowLeft' || e.code === 'ArrowDown' || e.code === 'MediaTrackPrevious') prevStation();
+                if (e.code === 'Space') togglePlay();
+            });
+
+            player.onwaiting = () => spinner.classList.remove('hidden');
+            player.onplaying = () => { log("Live"); spinner.classList.add('hidden'); isPlaying = true; updateUI(); };
+            player.onpause = () => { log("Paused"); spinner.classList.add('hidden'); isPlaying = false; updateUI(); };
+            player.onerror = () => { log("Stream Error"); spinner.classList.add('hidden'); };
+
+            document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+        }
 
         initApp();
     </script>
