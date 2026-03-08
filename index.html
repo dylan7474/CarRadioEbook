@@ -135,6 +135,7 @@
         let hlsInstance = null;
         let lastProgressSaveAt = 0;
         let mediaSessionHandlersBound = false;
+        const seekStepSeconds = 15;
         const ebookProgressEndpoint = '/api/ebook-progress';
         
         const player = document.getElementById('radio-player');
@@ -214,8 +215,8 @@
                     pause: () => pausePlayback(),
                     previoustrack: () => prevStation(),
                     nexttrack: () => nextStation(),
-                    seekbackward: () => prevStation(),
-                    seekforward: () => nextStation(),
+                    seekbackward: (details) => seekBy(-(details?.seekOffset || seekStepSeconds)),
+                    seekforward: (details) => seekBy(details?.seekOffset || seekStepSeconds),
                     stop: () => pausePlayback()
                 };
 
@@ -320,6 +321,21 @@
             }
         }
 
+        function seekBy(seconds) {
+            const station = stations[currentIndex];
+            if (!station || !station.isEbook || !Number.isFinite(seconds) || seconds === 0) return false;
+            if (!Number.isFinite(player.currentTime)) return false;
+
+            const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : null;
+            const targetTime = player.currentTime + seconds;
+            const clampedTime = duration ? Math.min(Math.max(targetTime, 0), Math.max(duration - 0.25, 0)) : Math.max(targetTime, 0);
+
+            player.currentTime = clampedTime;
+            persistStationProgress(station);
+            log(`${seconds > 0 ? 'Forward' : 'Rewind'} ${station.name}`);
+            return true;
+        }
+
         function startPlayback() {
             if (!player.src || player.src.includes(window.location.hostname)) syncStation();
             player.play().then(() => { 
@@ -402,8 +418,12 @@
             }, { passive: true });
 
             document.addEventListener('keydown', (e) => {
-                if (e.code === 'ArrowRight' || e.code === 'ArrowUp' || e.code === 'MediaTrackNext') nextStation();
-                if (e.code === 'ArrowLeft' || e.code === 'ArrowDown' || e.code === 'MediaTrackPrevious') prevStation();
+                if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+                    e.preventDefault();
+                    if (seekBy(e.code === 'ArrowUp' ? seekStepSeconds : -seekStepSeconds)) return;
+                }
+                if (e.code === 'ArrowRight' || e.code === 'MediaTrackNext') nextStation();
+                if (e.code === 'ArrowLeft' || e.code === 'MediaTrackPrevious') prevStation();
                 if (e.code === 'Space') togglePlay();
             });
 
