@@ -6,6 +6,7 @@ The UI is optimized for in-car or kiosk-style use:
 - full-screen single-tap play/pause
 - swipe-based station navigation
 - minimal overlays for status and buffering state
+- an ebook-only progress bar with elapsed/total time
 
 ## What the application is
 
