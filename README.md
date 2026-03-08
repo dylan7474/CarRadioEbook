@@ -29,8 +29,10 @@ When deployed with the included `deploy.sh` flow, a lightweight Node server is g
 
 ### Keyboard controls
 - **Space**: Play/Pause.
-- **Arrow Right / Arrow Up**: Next station.
-- **Arrow Left / Arrow Down**: Previous station.
+- **Arrow Right**: Next station.
+- **Arrow Left**: Previous station.
+- **Arrow Up**: Seek forward in audiobook stations (15s).
+- **Arrow Down**: Seek backward in audiobook stations (15s).
 
 ### Media session controls
 On supported devices/browsers, lock-screen and hardware media controls are wired for:
@@ -38,6 +40,8 @@ On supported devices/browsers, lock-screen and hardware media controls are wired
 - Pause
 - Previous track (previous station)
 - Next track (next station)
+- Seek backward (rewind audiobook stations)
+- Seek forward (fast-forward audiobook stations)
 
 ## Build / run instructions
 
