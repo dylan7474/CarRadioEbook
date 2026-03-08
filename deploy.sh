@@ -10,8 +10,14 @@ CONTAINER_NAME="carradio"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The host directory containing your Fiction/NonFiction folders
 EBOOK_DIR_HOST="$HOME/my_audiobooks"
+EBOOK_PROGRESS_HOST="$HOME/.carradio_ebook_progress.json"
 
 echo "=== Deploying ${PROJECT_NAME} with Ebook Support ==="
+
+# Ensure server-side progress store exists
+if [ ! -f "$EBOOK_PROGRESS_HOST" ]; then
+  echo "{}" > "$EBOOK_PROGRESS_HOST"
+fi
 
 # 1. Environment setup
 cd "$SCRIPT_DIR"
@@ -40,6 +46,7 @@ const { URL } = require('url');
 
 const PORT = Number(process.env.PORT) || 3011;
 const STATIC_ROOT = process.env.STATIC_ROOT || __dirname;
+const PROGRESS_FILE = path.join(STATIC_ROOT, 'ebook-progress.json');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -76,6 +83,20 @@ const getEbooks = (dir, baseDir) => {
   return results;
 };
 
+const readProgressStore = () => {
+  try {
+    if (!fs.existsSync(PROGRESS_FILE)) return {};
+    return JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+};
+
+const writeProgressStore = (store) => {
+  fs.writeFileSync(PROGRESS_FILE, JSON.stringify(store, null, 2));
+};
+
+
 const serveStatic = (req, res, url) => {
   // 1. Handle API requests
   if (url.pathname === '/api/ebooks') {
@@ -83,6 +104,47 @@ const serveStatic = (req, res, url) => {
     const ebooks = getEbooks(ebookPath, ebookPath);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(ebooks));
+    return;
+  }
+
+  if (url.pathname === '/api/ebook-progress' && req.method === 'GET') {
+    const ebookUrl = url.searchParams.get('url') || '';
+    const store = readProgressStore();
+    const position = Number(store[ebookUrl] || 0);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ url: ebookUrl, position: Number.isFinite(position) ? position : 0 }));
+    return;
+  }
+
+  if (url.pathname === '/api/ebook-progress' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1024 * 32) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const ebookUrl = String(payload.url || '');
+        const position = Number(payload.position);
+
+        if (!ebookUrl || !Number.isFinite(position) || position < 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid progress payload' }));
+          return;
+        }
+
+        const store = readProgressStore();
+        store[ebookUrl] = position;
+        writeProgressStore(store);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Malformed JSON payload' }));
+      }
+    });
     return;
   }
 
@@ -152,7 +214,7 @@ cat <<DOCKER_EOF > Dockerfile
 FROM node:20-slim
 WORKDIR /app
 COPY index.html server.js ./
-RUN mkdir -p /app/ebooks
+RUN mkdir -p /app/ebooks && echo '{}' > /app/ebook-progress.json
 EXPOSE ${PORT_ARG}
 ENV PORT=${PORT_ARG}
 ENV STATIC_ROOT=/app
@@ -172,6 +234,7 @@ docker run -d \
   --name "$CONTAINER_NAME" \
   -p "$PORT_ARG:$PORT_ARG" \
   -v "${EBOOK_DIR_HOST}:/app/ebooks:ro" \
+  -v "${EBOOK_PROGRESS_HOST}:/app/ebook-progress.json" \
   --restart unless-stopped \
   "$IMAGE_NAME"
 
@@ -181,4 +244,5 @@ IP_ADDR=$(python3 -c "import socket; s = socket.socket(socket.AF_INET, socket.SO
 echo "========================================="
 echo "Deployed at http://${IP_ADDR}:${PORT_ARG}"
 echo "Ebooks mapped from: ${EBOOK_DIR_HOST}"
+echo "Progress mapped from: ${EBOOK_PROGRESS_HOST}"
 echo "========================================="

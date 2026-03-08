@@ -134,6 +134,7 @@
         let isPlaying = false;
         let hlsInstance = null;
         let mediaSessionHandlersBound = false;
+        const ebookProgressEndpoint = '/api/ebook-progress';
         
         const player = document.getElementById('radio-player');
         const mainIcon = document.getElementById('main-icon');
@@ -161,6 +162,7 @@
                             name: b.name,
                             url: b.url,
                             type: 'mp3',
+                            isEbook: true,
                             color: b.category === 'Fiction' ? 'text-emerald-400' : 'text-orange-400',
                             sub: b.category
                         });
@@ -253,10 +255,53 @@
                 player.src = s.url;
             }
 
+            restoreEbookPosition(s);
+
             if (isPlaying) {
                 player.play().catch(() => log("Play Interrupted"));
             }
             updateMediaSession();
+        }
+
+        async function restoreEbookPosition(station) {
+            if (!station.isEbook) return;
+            try {
+                const res = await fetch(`${ebookProgressEndpoint}?url=${encodeURIComponent(station.url)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const savedPosition = Number(data.position);
+                if (!Number.isFinite(savedPosition) || savedPosition <= 0) return;
+
+                const applySavedTime = () => {
+                    if (stations[currentIndex] !== station || !Number.isFinite(player.duration) || player.duration <= 0) {
+                        return;
+                    }
+                    const maxResumeTime = Math.max(player.duration - 1, 0);
+                    const resumeTime = Math.min(savedPosition, maxResumeTime);
+                    if (resumeTime > 0) {
+                        player.currentTime = resumeTime;
+                        log(`Resumed ${station.name}`);
+                    }
+                };
+
+                if (player.readyState >= 1) applySavedTime();
+                else player.addEventListener('loadedmetadata', applySavedTime, { once: true });
+            } catch (e) {
+                log("Resume Lookup Failed");
+            }
+        }
+
+        async function saveEbookProgress(station, position) {
+            if (!station || !station.isEbook || !Number.isFinite(position)) return;
+            try {
+                await fetch(ebookProgressEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: station.url, position })
+                });
+            } catch (e) {
+                log("Progress Save Failed");
+            }
         }
 
         function startPlayback() {
@@ -340,6 +385,14 @@
             player.onwaiting = () => spinner.classList.remove('hidden');
             player.onplaying = () => { log("Live"); spinner.classList.add('hidden'); isPlaying = true; updateUI(); };
             player.onpause = () => { log("Paused"); spinner.classList.add('hidden'); isPlaying = false; updateUI(); };
+            player.onended = () => {
+                const station = stations[currentIndex];
+                const endPosition = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : player.currentTime;
+                saveEbookProgress(station, endPosition);
+                isPlaying = false;
+                updateUI();
+                log("Playback Ended");
+            };
             player.onerror = () => { log("Stream Error"); spinner.classList.add('hidden'); };
 
             document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
