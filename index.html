@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AutoHub - Master Radio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
+    <style>
+        body, html { 
+            margin: 0; padding: 0; height: 100%; overflow: hidden; 
+            background-color: #000; color: white; touch-action: none; 
+            font-family: -apple-system, system-ui, sans-serif;
+            user-select: none;
+        }
+        
+        #station-carousel { 
+            display: flex; height: 100%; 
+            transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
+        }
+
+        .station-page { 
+            flex: 0 0 100vw; height: 100%; display: flex; 
+            flex-direction: column; align-items: center; 
+            justify-content: center; padding: 1.5rem; 
+        }
+
+        .station-title {
+            font-size: 12vw;
+            line-height: 0.9;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: -0.05em;
+            text-align: center;
+            width: 100%;
+        }
+
+        .active-glow {
+            filter: drop-shadow(0 0 40px rgba(59, 130, 246, 0.4));
+            transition: filter 0.5s ease;
+        }
+
+        .master-control {
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 100;
+            width: 100vw; height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .status-bar {
+            position: absolute;
+            top: 2.5rem;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 50;
+            pointer-events: none;
+            gap: 0.5rem;
+        }
+
+        .loader {
+            width: 12px; height: 12px;
+            border: 2px solid white;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            animation: rotation 1s linear infinite;
+        }
+
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            transition: all 0.4s ease;
+        }
+        .dot-active {
+            background: white;
+            width: 24px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container" class="relative w-full h-full overflow-hidden">
+        
+        <!-- Status Overlay -->
+        <div class="status-bar">
+            <div class="bg-white/5 border border-white/10 px-4 py-1.5 rounded-full flex items-center gap-3 shadow-lg">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-neutral-600 transition-colors"></div>
+                <span id="bt-status" class="text-[9px] font-black uppercase tracking-[0.2em] text-white/50">Initializing</span>
+                <div id="loading-spinner" class="hidden"><span class="loader"></span></div>
+            </div>
+            <div id="debug-log" class="text-[7px] text-white/20 uppercase tracking-widest font-mono">Loading System</div>
+        </div>
+
+        <!-- Touch Interaction Layer -->
+        <button class="master-control" onclick="togglePlay()">
+            <div id="play-pause-container" class="opacity-10 transition-opacity duration-300">
+                <i data-lucide="play" id="main-icon" style="width: 120px; height: 120px;"></i>
+            </div>
+        </button>
+
+        <!-- Dynamic Station Pages -->
+        <div id="station-carousel"></div>
+
+        <!-- Progress Tracker -->
+        <div id="dot-container" class="absolute bottom-12 w-full flex justify-center gap-2.5 z-50"></div>
+    </div>
+
+    <audio id="radio-player" preload="none"></audio>
+
+    <script>
+        const stations = [
+            { name: "Radio Paradise", url: "https://stream.radioparadise.com/mp3-128", type: 'mp3', color: 'text-blue-500', sub: 'Main Mix' },
+            { name: "RP Rock Mix", url: "https://stream.radioparadise.com/rock-128", type: 'mp3', color: 'text-red-600', sub: 'Paradise Rock' },
+            { name: "BBC Radio 4", url: "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d96000.norewind.m3u8", type: 'hls', color: 'text-neutral-400', sub: 'BBC Culture' },
+            { name: "NPR (WNYC)", url: "https://fm939.wnyc.org/wnycfm", type: 'mp3', color: 'text-blue-400', sub: 'US News & Talk' }, 
+            { name: "BBC World", url: "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service", type: 'mp3', color: 'text-indigo-400', sub: 'World Service' },
+            { name: "YourClassical", url: "https://cms.stream.publicradio.org/cms.mp3", type: 'mp3', color: 'text-amber-500', sub: 'Classical Focus' }, 
+            { name: "C-SPAN Radio", url: "https://playerservices.streamtheworld.com/api/livestream-redirect/CSPANRADIO.mp3", type: 'mp3', color: 'text-red-500', sub: 'Politics' } 
+        ];
+
+        let currentIndex = 0;
+        let isPlaying = false;
+        let hlsInstance = null;
+        
+        const player = document.getElementById('radio-player');
+        const mainIcon = document.getElementById('main-icon');
+        const carousel = document.getElementById('station-carousel');
+        const btStatus = document.getElementById('bt-status');
+        const statusDot = document.getElementById('status-dot');
+        const dotContainer = document.getElementById('dot-container');
+        const debugLog = document.getElementById('debug-log');
+        const spinner = document.getElementById('loading-spinner');
+
+        function log(msg) {
+            debugLog.innerText = msg;
+            console.log("[CarRadio] " + msg);
+        }
+
+        async function initApp() {
+            log("Fetching ebooks...");
+            try {
+                const res = await fetch('/api/ebooks');
+                if (res.ok) {
+                    const books = await res.json();
+                    books.forEach(b => {
+                        stations.push({
+                            name: b.name,
+                            url: b.url,
+                            type: 'mp3',
+                            color: b.category === 'Fiction' ? 'text-emerald-400' : 'text-orange-400',
+                            sub: b.category
+                        });
+                    });
+                }
+            } catch (e) { log("Ebook Scan Failed"); }
+
+            renderApp();
+        }
+
+        function renderApp() {
+            carousel.innerHTML = '';
+            dotContainer.innerHTML = '';
+            
+            stations.forEach((s, i) => {
+                // Page
+                const page = document.createElement('div');
+                page.className = 'station-page';
+                page.innerHTML = `
+                    <div class="station-title ${s.color}" id="title-${i}">${s.name}</div>
+                    <div class="text-white/30 font-bold tracking-[0.4em] mt-4 uppercase text-[10px]">${s.sub}</div>
+                `;
+                carousel.appendChild(page);
+
+                // Dot
+                const d = document.createElement('div');
+                d.id = 'dot-' + i;
+                d.className = 'dot';
+                dotContainer.appendChild(d);
+            });
+
+            carousel.style.width = `${stations.length * 100}vw`;
+            updateCarousel();
+            lucide.createIcons();
+        }
+
+        function updateMediaSession() {
+            if ('mediaSession' in navigator) {
+                const s = stations[currentIndex];
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: s.name,
+                    artist: s.sub,
+                    album: "CarRadio"
+                });
+                
+                // Set Handlers
+                navigator.mediaSession.setActionHandler('play', () => togglePlay());
+                navigator.mediaSession.setActionHandler('pause', () => togglePlay());
+                navigator.mediaSession.setActionHandler('previoustrack', () => prevStation());
+                navigator.mediaSession.setActionHandler('nexttrack', () => nextStation());
+                
+                navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+                btStatus.innerText = s.name;
+                statusDot.className = "w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]";
+            }
+        }
+
+        function syncStation() {
+            const s = stations[currentIndex];
+            log("Loading " + s.name);
+            spinner.classList.remove('hidden');
+            
+            if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+
+            player.pause();
+            player.src = "";
+            player.load();
+
+            if (s.type === 'hls') {
+                if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    hlsInstance = new Hls();
+                    hlsInstance.loadSource(s.url);
+                    hlsInstance.attachMedia(player);
+                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+                    player.src = s.url;
+                }
+            } else {
+                player.src = s.url;
+            }
+
+            if (isPlaying) {
+                player.play().catch(() => log("Play Interrupted"));
+            }
+            updateMediaSession();
+        }
+
+        function togglePlay() {
+            if (isPlaying) {
+                player.pause();
+                isPlaying = false;
+            } else {
+                if (!player.src || player.src.includes(window.location.hostname)) syncStation();
+                player.play().then(() => { isPlaying = true; updateUI(); }).catch(e => log("Error playing"));
+            }
+            updateUI();
+        }
+
+        function nextStation() { currentIndex = (currentIndex + 1) % stations.length; updateCarousel(); }
+        function prevStation() { currentIndex = (currentIndex - 1 + stations.length) % stations.length; updateCarousel(); }
+
+        function updateCarousel() {
+            carousel.style.transform = `translateX(-${currentIndex * 100}vw)`;
+            stations.forEach((_, i) => {
+                const dot = document.getElementById('dot-' + i);
+                if (dot) dot.className = (i === currentIndex) ? 'dot dot-active' : 'dot';
+            });
+            syncStation();
+            updateUI();
+        }
+
+        function updateUI() {
+            mainIcon.setAttribute('data-lucide', isPlaying ? 'pause' : 'play');
+            lucide.createIcons();
+            document.getElementById('play-pause-container').style.opacity = isPlaying ? "0.05" : "0.3";
+            document.querySelectorAll('.station-title').forEach((title, i) => {
+                title.classList.toggle('active-glow', isPlaying && i === currentIndex);
+            });
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+        }
+
+        player.onwaiting = () => spinner.classList.remove('hidden');
+        player.onplaying = () => { log("Live"); spinner.classList.add('hidden'); isPlaying = true; updateUI(); };
+        player.onpause = () => { log("Paused"); spinner.classList.add('hidden'); isPlaying = false; updateUI(); };
+        player.onerror = () => { log("Stream Error"); spinner.classList.add('hidden'); };
+
+        // Swipe
+        let startX = 0;
+        document.ontouchstart = e => startX = e.touches[0].clientX;
+        document.ontouchend = e => {
+            const dx = startX - e.changedTouches[0].clientX;
+            if (Math.abs(dx) > 70) { if (dx > 0) nextStation(); else prevStation(); }
+        };
+
+        // Keyboard
+        document.onkeydown = e => {
+            if (e.code === 'ArrowRight' || e.code === 'ArrowUp') nextStation();
+            if (e.code === 'ArrowLeft' || e.code === 'ArrowDown') prevStation();
+            if (e.code === 'Space') togglePlay();
+        };
+
+        initApp();
+    </script>
+</body>
+</html>
