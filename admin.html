@@ -22,16 +22,16 @@
     <div id="status" class="text-xs uppercase tracking-wider text-white/60 mb-4">Loading streams...</div>
 
     <div class="overflow-x-auto border border-white/10 rounded-lg">
-      <table class="w-full min-w-[980px] text-sm">
+      <table class="w-full min-w-[920px] text-sm">
         <thead class="bg-white/5">
           <tr>
             <th class="p-2 text-left w-20">Order</th>
             <th class="p-2 text-left">Name</th>
             <th class="p-2 text-left">URL</th>
-            <th class="p-2 text-left">Type</th>
+            <th class="p-2 text-left w-24">Type</th>
             <th class="p-2 text-left">Color Class</th>
             <th class="p-2 text-left">Subtitle</th>
-            <th class="p-2 text-left">Action</th>
+            <th class="p-2 text-left w-24 whitespace-nowrap">Action</th>
           </tr>
         </thead>
         <tbody id="stream-rows"></tbody>
@@ -63,7 +63,7 @@
       <td class="p-2"><input data-field="color" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="text-blue-500"></td>
       <td class="p-2"><input data-field="sub" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="Description"></td>
       <td class="p-2">
-        <button data-action="delete" class="px-3 py-2 rounded bg-red-700 hover:bg-red-600">Delete</button>
+        <button data-action="delete" class="w-full px-2 py-2 rounded bg-red-700 hover:bg-red-600 whitespace-nowrap">Delete</button>
       </td>
     </tr>
   </template>
