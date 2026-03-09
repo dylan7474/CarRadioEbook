@@ -25,6 +25,7 @@
       <table class="w-full min-w-[980px] text-sm">
         <thead class="bg-white/5">
           <tr>
+            <th class="p-2 text-left w-20">Order</th>
             <th class="p-2 text-left">Name</th>
             <th class="p-2 text-left">URL</th>
             <th class="p-2 text-left">Type</th>
@@ -39,7 +40,18 @@
   </main>
 
   <template id="row-template">
-    <tr class="border-t border-white/10 align-top">
+    <tr class="border-t border-white/10 align-top" draggable="true">
+      <td class="p-2">
+        <button
+          type="button"
+          data-action="drag"
+          class="w-full px-2 py-2 rounded bg-white/10 hover:bg-white/20 text-xs tracking-wide uppercase font-semibold cursor-grab active:cursor-grabbing"
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+        >
+          ↕ Move
+        </button>
+      </td>
       <td class="p-2"><input data-field="name" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="Station name"></td>
       <td class="p-2"><input data-field="url" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="https://..."></td>
       <td class="p-2">
@@ -60,6 +72,7 @@
     const rows = document.getElementById('stream-rows');
     const statusEl = document.getElementById('status');
     const rowTemplate = document.getElementById('row-template');
+    let draggingRow = null;
 
     function setStatus(msg, error = false) {
       statusEl.textContent = msg;
@@ -77,6 +90,36 @@
       row.querySelector('[data-action="delete"]').addEventListener('click', () => {
         row.remove();
         if (!rows.children.length) createRow();
+      });
+      row.addEventListener('dragstart', (event) => {
+        const dragHandle = row.querySelector('[data-action="drag"]');
+        if (event.target !== row && event.target !== dragHandle) {
+          event.preventDefault();
+          return;
+        }
+        draggingRow = row;
+        row.classList.add('opacity-60');
+      });
+      row.addEventListener('dragend', () => {
+        draggingRow = null;
+        row.classList.remove('opacity-60', 'ring-2', 'ring-blue-400');
+      });
+      row.addEventListener('dragover', (event) => {
+        if (!draggingRow || draggingRow === row) return;
+        event.preventDefault();
+        row.classList.add('ring-2', 'ring-blue-400');
+      });
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('ring-2', 'ring-blue-400');
+      });
+      row.addEventListener('drop', (event) => {
+        event.preventDefault();
+        row.classList.remove('ring-2', 'ring-blue-400');
+        if (!draggingRow || draggingRow === row) return;
+        const rowRect = row.getBoundingClientRect();
+        const dropInLowerHalf = event.clientY > rowRect.top + rowRect.height / 2;
+        if (dropInLowerHalf) row.after(draggingRow);
+        else row.before(draggingRow);
       });
       rows.appendChild(fragment);
     }
