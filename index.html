@@ -178,8 +178,13 @@
         let isPlaying = false;
         let hlsInstance = null;
         let lastProgressSaveAt = 0;
-        let mediaSessionHandlersBound = false;
+        let reconnectTimer = null;
+        let waitingWatchdogTimer = null;
+        let reconnectAttempts = 0;
+        let pendingNetworkRetry = false;
         const seekStepSeconds = 15;
+        const maxReconnectAttempts = 5;
+        const reconnectBaseDelayMs = 1500;
         const ebookProgressEndpoint = '/api/ebook-progress';
         
         const player = document.getElementById('radio-player');
@@ -198,6 +203,46 @@
         function log(msg) {
             debugLog.innerText = msg;
             console.log("[CarRadio] " + msg);
+        }
+
+        function clearReconnectTimer() {
+            if (!reconnectTimer) return;
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+
+        function clearWaitingWatchdog() {
+            if (!waitingWatchdogTimer) return;
+            clearTimeout(waitingWatchdogTimer);
+            waitingWatchdogTimer = null;
+        }
+
+        function resetReconnectState() {
+            reconnectAttempts = 0;
+            pendingNetworkRetry = false;
+            clearReconnectTimer();
+            clearWaitingWatchdog();
+        }
+
+        function scheduleReconnect(reason, force = false) {
+            if (!isPlaying) return;
+            if (!force && reconnectAttempts >= maxReconnectAttempts) {
+                log("Stream stalled. Tap to retry.");
+                spinner.classList.add('hidden');
+                return;
+            }
+
+            clearReconnectTimer();
+            const delay = Math.min(reconnectBaseDelayMs * (2 ** reconnectAttempts), 10000);
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                if (!isPlaying) return;
+                reconnectAttempts += 1;
+                log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts})`);
+                syncStation();
+            }, delay);
+
+            log(`Recovering stream (${reason})`);
         }
 
         async function initApp() {
@@ -285,6 +330,8 @@
             const s = stations[currentIndex];
             log("Loading " + s.name);
             spinner.classList.remove('hidden');
+            clearReconnectTimer();
+            clearWaitingWatchdog();
             
             if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
@@ -295,6 +342,21 @@
             if (s.type === 'hls') {
                 if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                     hlsInstance = new Hls();
+                    hlsInstance.on(Hls.Events.ERROR, (_, data) => {
+                        if (stations[currentIndex] !== s || !data?.fatal) return;
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            log("HLS Media Recover");
+                            hlsInstance.recoverMediaError();
+                            return;
+                        }
+
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            log("HLS Network Error");
+                        } else {
+                            log("HLS Fatal Error");
+                        }
+                        scheduleReconnect('hls', true);
+                    });
                     hlsInstance.loadSource(s.url);
                     hlsInstance.attachMedia(player);
                 } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
@@ -429,6 +491,8 @@
         function pausePlayback() {
             player.pause();
             isPlaying = false;
+            clearReconnectTimer();
+            clearWaitingWatchdog();
             updateUI();
             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused";
         }
@@ -440,12 +504,14 @@
 
         function nextStation() {
             persistStationProgress(stations[currentIndex]);
+            reconnectAttempts = 0;
             currentIndex = (currentIndex + 1) % stations.length;
             updateCarousel();
         }
 
         function prevStation() {
             persistStationProgress(stations[currentIndex]);
+            reconnectAttempts = 0;
             currentIndex = (currentIndex - 1 + stations.length) % stations.length;
             updateCarousel();
         }
@@ -509,13 +575,29 @@
                 if (e.code === 'Space') togglePlay();
             });
 
-            player.onwaiting = () => spinner.classList.remove('hidden');
-            player.onplaying = () => { log("Live"); spinner.classList.add('hidden'); isPlaying = true; updateUI(); };
+            player.onstalled = () => {
+                spinner.classList.remove('hidden');
+                scheduleReconnect('stalled');
+            };
+            player.onwaiting = () => {
+                spinner.classList.remove('hidden');
+                clearWaitingWatchdog();
+                waitingWatchdogTimer = setTimeout(() => scheduleReconnect('buffer-timeout', true), 8000);
+            };
+            player.onplaying = () => {
+                log("Live");
+                spinner.classList.add('hidden');
+                isPlaying = true;
+                resetReconnectState();
+                updateUI();
+            };
             player.onpause = () => {
                 persistStationProgress(stations[currentIndex]);
                 log("Paused");
                 spinner.classList.add('hidden');
                 isPlaying = false;
+                clearReconnectTimer();
+                clearWaitingWatchdog();
                 updateUI();
                 updateEbookProgressUI();
             };
@@ -528,7 +610,11 @@
                 updateEbookProgressUI();
                 log("Playback Ended");
             };
-            player.onerror = () => { log("Stream Error"); spinner.classList.add('hidden'); };
+            player.onerror = () => {
+                log("Stream Error");
+                spinner.classList.remove('hidden');
+                scheduleReconnect('media-error');
+            };
             player.ontimeupdate = () => {
                 persistStationProgress(stations[currentIndex]);
                 updateEbookProgressUI();
@@ -537,6 +623,28 @@
             player.onseeked = () => updateEbookProgressUI();
 
             window.addEventListener('pagehide', () => persistStationProgress(stations[currentIndex]));
+            window.addEventListener('offline', () => {
+                pendingNetworkRetry = true;
+                log("Offline");
+                spinner.classList.remove('hidden');
+            });
+            window.addEventListener('online', () => {
+                log("Online");
+                if (!isPlaying && !pendingNetworkRetry) {
+                    spinner.classList.add('hidden');
+                    return;
+                }
+                reconnectAttempts = 0;
+                pendingNetworkRetry = false;
+                syncStation();
+            });
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'visible' || !isPlaying) return;
+                if (player.paused || player.readyState < 2) {
+                    log("Refreshing Stream");
+                    syncStation();
+                }
+            });
 
             document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
         }

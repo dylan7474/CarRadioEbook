@@ -44,6 +44,17 @@ On supported devices/browsers, lock-screen and hardware media controls are wired
 - Seek backward (rewind audiobook stations)
 - Seek forward (fast-forward audiobook stations)
 
+
+## Playback resilience
+
+To improve reliability on mobile data and unstable Wi-Fi, the player now includes:
+- automatic stream reconnect attempts with backoff when buffering stalls or stream errors occur
+- online/offline awareness (retries automatically when connectivity returns)
+- stream refresh when returning to the tab if playback is stuck
+- HLS fatal-error recovery fallback for stations that use m3u8 streams
+
+If reconnect attempts are exhausted, a tap on the screen will still trigger a fresh play attempt.
+
 ## Build / run instructions
 
 This project is designed around the provided deployment script.
