@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CarRadio Stream Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-neutral-950 text-white min-h-screen">
+  <main class="max-w-5xl mx-auto p-4 md:p-8">
+    <header class="mb-6">
+      <h1 class="text-2xl md:text-3xl font-black uppercase tracking-wider">Stream Admin</h1>
+      <p class="text-white/70 text-sm mt-2">Edit radio streams used by <code>index.html</code>. Changes save to <code>streams.json</code>.</p>
+    </header>
+
+    <div class="flex flex-wrap gap-3 mb-4">
+      <button id="add-row" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 font-semibold">Add Stream</button>
+      <button id="save" class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 font-semibold">Save Changes</button>
+      <a href="/" class="px-4 py-2 rounded bg-white/10 hover:bg-white/20 font-semibold">Back to Player</a>
+    </div>
+
+    <div id="status" class="text-xs uppercase tracking-wider text-white/60 mb-4">Loading streams...</div>
+
+    <div class="overflow-x-auto border border-white/10 rounded-lg">
+      <table class="w-full min-w-[980px] text-sm">
+        <thead class="bg-white/5">
+          <tr>
+            <th class="p-2 text-left">Name</th>
+            <th class="p-2 text-left">URL</th>
+            <th class="p-2 text-left">Type</th>
+            <th class="p-2 text-left">Color Class</th>
+            <th class="p-2 text-left">Subtitle</th>
+            <th class="p-2 text-left">Action</th>
+          </tr>
+        </thead>
+        <tbody id="stream-rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <template id="row-template">
+    <tr class="border-t border-white/10 align-top">
+      <td class="p-2"><input data-field="name" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="Station name"></td>
+      <td class="p-2"><input data-field="url" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="https://..."></td>
+      <td class="p-2">
+        <select data-field="type" class="w-full bg-black/30 border border-white/20 rounded p-2">
+          <option value="mp3">mp3</option>
+          <option value="hls">hls</option>
+        </select>
+      </td>
+      <td class="p-2"><input data-field="color" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="text-blue-500"></td>
+      <td class="p-2"><input data-field="sub" class="w-full bg-black/30 border border-white/20 rounded p-2" placeholder="Description"></td>
+      <td class="p-2">
+        <button data-action="delete" class="px-3 py-2 rounded bg-red-700 hover:bg-red-600">Delete</button>
+      </td>
+    </tr>
+  </template>
+
+  <script>
+    const rows = document.getElementById('stream-rows');
+    const statusEl = document.getElementById('status');
+    const rowTemplate = document.getElementById('row-template');
+
+    function setStatus(msg, error = false) {
+      statusEl.textContent = msg;
+      statusEl.className = `text-xs uppercase tracking-wider mb-4 ${error ? 'text-red-400' : 'text-white/60'}`;
+    }
+
+    function createRow(stream = {}) {
+      const fragment = rowTemplate.content.cloneNode(true);
+      const row = fragment.querySelector('tr');
+      row.querySelector('[data-field="name"]').value = stream.name || '';
+      row.querySelector('[data-field="url"]').value = stream.url || '';
+      row.querySelector('[data-field="type"]').value = stream.type || 'mp3';
+      row.querySelector('[data-field="color"]').value = stream.color || 'text-blue-500';
+      row.querySelector('[data-field="sub"]').value = stream.sub || '';
+      row.querySelector('[data-action="delete"]').addEventListener('click', () => {
+        row.remove();
+        if (!rows.children.length) createRow();
+      });
+      rows.appendChild(fragment);
+    }
+
+    function readRows() {
+      return Array.from(rows.querySelectorAll('tr')).map((row) => {
+        return {
+          name: row.querySelector('[data-field="name"]').value.trim(),
+          url: row.querySelector('[data-field="url"]').value.trim(),
+          type: row.querySelector('[data-field="type"]').value.trim() || 'mp3',
+          color: row.querySelector('[data-field="color"]').value.trim() || 'text-blue-500',
+          sub: row.querySelector('[data-field="sub"]').value.trim()
+        };
+      }).filter((item) => item.name && item.url);
+    }
+
+    async function loadStreams() {
+      setStatus('Loading streams...');
+      try {
+        const res = await fetch('/api/streams');
+        if (!res.ok) throw new Error('Failed to load stream config');
+        const data = await res.json();
+        rows.innerHTML = '';
+        if (Array.isArray(data) && data.length) data.forEach(createRow);
+        else createRow();
+        setStatus('Streams loaded.');
+      } catch (error) {
+        rows.innerHTML = '';
+        createRow();
+        setStatus(error.message, true);
+      }
+    }
+
+    async function saveStreams() {
+      const payload = readRows();
+      if (!payload.length) {
+        setStatus('Add at least one valid stream before saving.', true);
+        return;
+      }
+      setStatus('Saving...');
+      try {
+        const res = await fetch('/api/streams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Failed to save stream config');
+        setStatus('Saved successfully. Reload player to use updates.');
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    document.getElementById('add-row').addEventListener('click', () => createRow());
+    document.getElementById('save').addEventListener('click', saveStreams);
+    loadStreams();
+  </script>
+</body>
+</html>
