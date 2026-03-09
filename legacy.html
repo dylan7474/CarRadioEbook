@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AutoHub - Master Radio (Legacy)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/promise-polyfill@8/dist/polyfill.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/whatwg-fetch@3.6.20/dist/fetch.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.9/babel.min.js"></script>
+    <style>
+        body, html { 
+            margin: 0; padding: 0; height: 100%; overflow: hidden; 
+            background-color: #000; color: white; touch-action: none; 
+            font-family: -apple-system, system-ui, sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        #station-carousel { 
+            display: flex; height: 100%; 
+            transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
+        }
+
+        .station-page { 
+            flex: 0 0 100vw; height: 100%; display: flex; 
+            flex-direction: column; align-items: center; 
+            justify-content: center; padding: 1.5rem; 
+        }
+
+        .station-title {
+            font-size: 12vw;
+            line-height: 0.9;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: -0.05em;
+            text-align: center;
+            width: 100%;
+        }
+
+        .active-glow {
+            filter: drop-shadow(0 0 40px rgba(59, 130, 246, 0.4));
+            transition: filter 0.5s ease;
+        }
+
+        .master-control {
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 100;
+            width: 100vw; height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .status-bar {
+            position: absolute;
+            top: 2.5rem;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 50;
+            pointer-events: none;
+            gap: 0.5rem;
+        }
+
+        .loader {
+            width: 12px; height: 12px;
+            border: 2px solid white;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            animation: rotation 1s linear infinite;
+        }
+
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            transition: all 0.4s ease;
+        }
+        .dot-active {
+            background: white;
+            width: 24px;
+            border-radius: 4px;
+        }
+
+        .ebook-progress {
+            position: absolute;
+            bottom: 5.25rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(78vw, 540px);
+            z-index: 55;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .ebook-progress.hidden {
+            opacity: 0;
+        }
+
+        .ebook-progress-track {
+            width: 100%;
+            height: 4px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.16);
+            overflow: hidden;
+        }
+
+        .ebook-progress-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: 9999px;
+            background: linear-gradient(90deg, rgba(52, 211, 153, 0.8), rgba(96, 165, 250, 0.95));
+            transition: width 0.2s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container" class="relative w-full h-full overflow-hidden">
+        
+        <!-- Status Overlay -->
+        <div class="status-bar">
+            <div class="bg-white/5 border border-white/10 px-4 py-1.5 rounded-full flex items-center gap-3 shadow-lg">
+                <div id="status-dot" class="w-2 h-2 rounded-full bg-neutral-600 transition-colors"></div>
+                <span id="bt-status" class="text-[9px] font-black uppercase tracking-[0.2em] text-white/50">Initializing</span>
+                <div id="loading-spinner" class="hidden"><span class="loader"></span></div>
+            </div>
+            <div id="debug-log" class="text-[7px] text-white/20 uppercase tracking-widest font-mono">Loading System</div>
+        </div>
+
+        <!-- Touch Interaction Layer -->
+        <button class="master-control" id="master-btn">
+            <div id="play-pause-container" class="opacity-10 transition-opacity duration-300">
+                <i data-lucide="play" id="main-icon" style="width: 120px; height: 120px;"></i>
+            </div>
+        </button>
+
+        <!-- Dynamic Station Pages -->
+        <div id="station-carousel"></div>
+
+        <!-- Ebook Progress -->
+        <div id="ebook-progress" class="ebook-progress hidden">
+            <div class="bg-black/35 backdrop-blur-sm border border-white/15 rounded-2xl px-4 py-2">
+                <div class="flex items-center justify-between text-[9px] font-bold uppercase tracking-[0.22em] text-white/80">
+                    <span>Book Progress</span>
+                    <span id="ebook-progress-label">0:00</span>
+                </div>
+                <div class="ebook-progress-track mt-2">
+                    <div id="ebook-progress-fill" class="ebook-progress-fill"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Tracker -->
+        <div id="dot-container" class="absolute bottom-12 w-full flex justify-center gap-2.5 z-50"></div>
+    </div>
+
+    <audio id="radio-player" preload="none"></audio>
+
+    <!-- Legacy mode: Babel transpiles modern syntax for older Safari/WebKit browsers. -->
+
+    <script type="text/babel" data-presets="env">
+        const stations = [
+            { name: "Radio Paradise", url: "https://stream.radioparadise.com/mp3-128", type: 'mp3', color: 'text-blue-500', sub: 'Main Mix' },
+            { name: "RP Rock Mix", url: "https://stream.radioparadise.com/rock-128", type: 'mp3', color: 'text-red-600', sub: 'Paradise Rock' },
+            { name: "BBC Radio 4", url: "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d96000.norewind.m3u8", type: 'hls', color: 'text-neutral-400', sub: 'BBC Culture' },
+            { name: "NPR (WNYC)", url: "https://fm939.wnyc.org/wnycfm", type: 'mp3', color: 'text-blue-400', sub: 'US News & Talk' }, 
+            { name: "BBC World", url: "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service", type: 'mp3', color: 'text-indigo-400', sub: 'World Service' },
+            { name: "YourClassical", url: "https://cms.stream.publicradio.org/cms.mp3", type: 'mp3', color: 'text-amber-500', sub: 'Classical Focus' }, 
+            { name: "C-SPAN Radio", url: "https://playerservices.streamtheworld.com/api/livestream-redirect/CSPANRADIO.mp3", type: 'mp3', color: 'text-red-500', sub: 'Politics' } 
+        ];
+
+        let currentIndex = 0;
+        let isPlaying = false;
+        let hlsInstance = null;
+        let lastProgressSaveAt = 0;
+        let reconnectTimer = null;
+        let waitingWatchdogTimer = null;
+        let reconnectAttempts = 0;
+        let pendingNetworkRetry = false;
+        const seekStepSeconds = 15;
+        const maxReconnectAttempts = 5;
+        const reconnectBaseDelayMs = 1500;
+        const ebookProgressEndpoint = '/api/ebook-progress';
+        
+        const player = document.getElementById('radio-player');
+        const mainIcon = document.getElementById('main-icon');
+        const carousel = document.getElementById('station-carousel');
+        const btStatus = document.getElementById('bt-status');
+        const statusDot = document.getElementById('status-dot');
+        const dotContainer = document.getElementById('dot-container');
+        const debugLog = document.getElementById('debug-log');
+        const spinner = document.getElementById('loading-spinner');
+        const masterBtn = document.getElementById('master-btn');
+        const ebookProgressPanel = document.getElementById('ebook-progress');
+        const ebookProgressLabel = document.getElementById('ebook-progress-label');
+        const ebookProgressFill = document.getElementById('ebook-progress-fill');
+
+        function log(msg) {
+            debugLog.innerText = msg;
+            console.log("[CarRadio] " + msg);
+        }
+
+        function clearReconnectTimer() {
+            if (!reconnectTimer) return;
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+
+        function clearWaitingWatchdog() {
+            if (!waitingWatchdogTimer) return;
+            clearTimeout(waitingWatchdogTimer);
+            waitingWatchdogTimer = null;
+        }
+
+        function resetReconnectState() {
+            reconnectAttempts = 0;
+            pendingNetworkRetry = false;
+            clearReconnectTimer();
+            clearWaitingWatchdog();
+        }
+
+        function scheduleReconnect(reason, force = false) {
+            if (!isPlaying) return;
+            if (!force && reconnectAttempts >= maxReconnectAttempts) {
+                log("Stream stalled. Tap to retry.");
+                spinner.classList.add('hidden');
+                return;
+            }
+
+            clearReconnectTimer();
+            const delay = Math.min(reconnectBaseDelayMs * (2 ** reconnectAttempts), 10000);
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                if (!isPlaying) return;
+                reconnectAttempts += 1;
+                log(`Reconnecting (${reconnectAttempts}/${maxReconnectAttempts})`);
+                syncStation();
+            }, delay);
+
+            log(`Recovering stream (${reason})`);
+        }
+
+        async function initApp() {
+            log("Fetching ebooks...");
+            try {
+                const res = await fetch('/api/ebooks');
+                if (res.ok) {
+                    const books = await res.json();
+                    books.forEach(b => {
+                        stations.push({
+                            name: b.name,
+                            url: b.url,
+                            type: 'mp3',
+                            isEbook: true,
+                            color: b.category === 'Fiction' ? 'text-emerald-400' : 'text-orange-400',
+                            sub: b.category
+                        });
+                    });
+                }
+            } catch (e) { log("Ebook Scan Failed"); }
+
+            renderApp();
+            bindEvents();
+        }
+
+        function renderApp() {
+            carousel.innerHTML = '';
+            dotContainer.innerHTML = '';
+            
+            stations.forEach((s, i) => {
+                const page = document.createElement('div');
+                page.className = 'station-page';
+                page.innerHTML = `
+                    <div class="station-title ${s.color}" id="title-${i}">${s.name}</div>
+                    <div class="text-white/30 font-bold tracking-[0.4em] mt-4 uppercase text-[10px]">${s.sub}</div>
+                `;
+                carousel.appendChild(page);
+
+                const d = document.createElement('div');
+                d.id = 'dot-' + i;
+                d.className = 'dot';
+                dotContainer.appendChild(d);
+            });
+
+            carousel.style.width = `${stations.length * 100}vw`;
+            updateCarousel(false);
+            lucide.createIcons();
+        }
+
+        function updateMediaSession() {
+            if ('mediaSession' in navigator) {
+                const s = stations[currentIndex];
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: s.name,
+                    artist: "AutoHub Live Radio",
+                    album: "Preset Channel " + (currentIndex + 1)
+                });
+                
+                // Restored full set of handlers from the original successfully tested version
+                const handlers = {
+                    play: () => startPlayback(),
+                    pause: () => pausePlayback(),
+                    previoustrack: () => prevStation(),
+                    nexttrack: () => nextStation(),
+                    seekbackward: (details) => seekBy(-(details?.seekOffset || seekStepSeconds)),
+                    seekforward: (details) => seekBy(details?.seekOffset || seekStepSeconds),
+                    stop: () => pausePlayback()
+                };
+
+                Object.entries(handlers).forEach(([action, handler]) => {
+                    try {
+                        navigator.mediaSession.setActionHandler(action, handler);
+                    } catch (e) {
+                        // Action not supported by this browser/OS
+                    }
+                });
+
+                navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+                btStatus.innerText = s.name;
+                statusDot.className = "w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]";
+            }
+        }
+
+        function syncStation() {
+            const s = stations[currentIndex];
+            log("Loading " + s.name);
+            spinner.classList.remove('hidden');
+            clearReconnectTimer();
+            clearWaitingWatchdog();
+            
+            if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+
+            player.pause();
+            player.src = "";
+            player.load();
+
+            if (s.type === 'hls') {
+                if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    hlsInstance = new Hls();
+                    hlsInstance.on(Hls.Events.ERROR, (_, data) => {
+                        if (stations[currentIndex] !== s || !data?.fatal) return;
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            log("HLS Media Recover");
+                            hlsInstance.recoverMediaError();
+                            return;
+                        }
+
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            log("HLS Network Error");
+                        } else {
+                            log("HLS Fatal Error");
+                        }
+                        scheduleReconnect('hls', true);
+                    });
+                    hlsInstance.loadSource(s.url);
+                    hlsInstance.attachMedia(player);
+                } else if (player.canPlayType('application/vnd.apple.mpegurl')) {
+                    player.src = s.url;
+                }
+            } else {
+                player.src = s.url;
+            }
+
+            restoreEbookPosition(s);
+
+            if (isPlaying) {
+                player.play().catch(() => log("Play Interrupted"));
+            }
+            updateMediaSession();
+        }
+
+        async function restoreEbookPosition(station) {
+            if (!station.isEbook) return;
+            try {
+                const res = await fetch(`${ebookProgressEndpoint}?url=${encodeURIComponent(station.url)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const savedPosition = Number(data.position);
+                if (!Number.isFinite(savedPosition) || savedPosition <= 0) return;
+
+                const applySavedTime = () => {
+                    if (stations[currentIndex] !== station) return;
+
+                    let resumeTime = savedPosition;
+                    if (Number.isFinite(player.duration) && player.duration > 0) {
+                        const maxResumeTime = Math.max(player.duration - 1, 0);
+                        resumeTime = Math.min(savedPosition, maxResumeTime);
+                    }
+
+                    if (resumeTime > 0) {
+                        player.currentTime = resumeTime;
+                        log(`Resumed ${station.name}`);
+                    }
+                };
+
+                if (player.readyState >= 1) applySavedTime();
+                else player.addEventListener('loadedmetadata', applySavedTime, { once: true });
+            } catch (e) {
+                log("Resume Lookup Failed");
+            }
+        }
+
+
+        function persistStationProgress(station) {
+            if (!station || !station.isEbook) return;
+            const position = Number(player.currentTime);
+            if (!Number.isFinite(position) || position <= 0) return;
+
+            const now = Date.now();
+            if (now - lastProgressSaveAt < 2000) return;
+            lastProgressSaveAt = now;
+            saveEbookProgress(station, position);
+        }
+
+        async function saveEbookProgress(station, position) {
+            if (!station || !station.isEbook || !Number.isFinite(position)) return;
+            try {
+                await fetch(ebookProgressEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: station.url, position })
+                });
+            } catch (e) {
+                log("Progress Save Failed");
+            }
+        }
+
+        function seekBy(seconds) {
+            const station = stations[currentIndex];
+            if (!station || !station.isEbook || !Number.isFinite(seconds) || seconds === 0) return false;
+            if (!Number.isFinite(player.currentTime)) return false;
+
+            const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : null;
+            const targetTime = player.currentTime + seconds;
+            const clampedTime = duration ? Math.min(Math.max(targetTime, 0), Math.max(duration - 0.25, 0)) : Math.max(targetTime, 0);
+
+            player.currentTime = clampedTime;
+            persistStationProgress(station);
+            updateEbookProgressUI();
+            log(`${seconds > 0 ? 'Forward' : 'Rewind'} ${station.name}`);
+            return true;
+        }
+
+        function formatTime(totalSeconds) {
+            if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '0:00';
+            const wholeSeconds = Math.floor(totalSeconds);
+            const hours = Math.floor(wholeSeconds / 3600);
+            const minutes = Math.floor((wholeSeconds % 3600) / 60);
+            const seconds = wholeSeconds % 60;
+            if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            return `${minutes}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        function updateEbookProgressUI() {
+            const station = stations[currentIndex];
+            if (!station || !station.isEbook) {
+                ebookProgressPanel.classList.add('hidden');
+                ebookProgressFill.style.width = '0%';
+                ebookProgressLabel.innerText = '0:00';
+                return;
+            }
+
+            const position = Number.isFinite(player.currentTime) ? player.currentTime : 0;
+            const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : null;
+
+            ebookProgressPanel.classList.remove('hidden');
+            if (duration) {
+                const progressPercent = Math.min(Math.max((position / duration) * 100, 0), 100);
+                ebookProgressFill.style.width = `${progressPercent}%`;
+                ebookProgressLabel.innerText = `${formatTime(position)} / ${formatTime(duration)}`;
+            } else {
+                ebookProgressFill.style.width = '0%';
+                ebookProgressLabel.innerText = formatTime(position);
+            }
+        }
+
+        function startPlayback() {
+            if (!player.src || player.src.includes(window.location.hostname)) syncStation();
+            player.play().then(() => { 
+                isPlaying = true; 
+                updateUI(); 
+                if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "playing";
+            }).catch(e => log("Play Blocked"));
+        }
+
+        function pausePlayback() {
+            player.pause();
+            isPlaying = false;
+            clearReconnectTimer();
+            clearWaitingWatchdog();
+            updateUI();
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = "paused";
+        }
+
+        function togglePlay() {
+            if (isPlaying) pausePlayback();
+            else startPlayback();
+        }
+
+        function nextStation() {
+            persistStationProgress(stations[currentIndex]);
+            reconnectAttempts = 0;
+            currentIndex = (currentIndex + 1) % stations.length;
+            updateCarousel();
+        }
+
+        function prevStation() {
+            persistStationProgress(stations[currentIndex]);
+            reconnectAttempts = 0;
+            currentIndex = (currentIndex - 1 + stations.length) % stations.length;
+            updateCarousel();
+        }
+
+        function updateCarousel(shouldSync = true) {
+            carousel.style.transform = `translateX(-${currentIndex * 100}vw)`;
+            stations.forEach((_, i) => {
+                const dot = document.getElementById('dot-' + i);
+                if (dot) dot.className = (i === currentIndex) ? 'dot dot-active' : 'dot';
+            });
+            if (shouldSync) syncStation();
+            updateUI();
+            updateEbookProgressUI();
+        }
+
+        function updateUI() {
+            const iconName = isPlaying ? 'pause' : 'play';
+            if (mainIcon.getAttribute('data-lucide') !== iconName) {
+                mainIcon.setAttribute('data-lucide', iconName);
+                lucide.createIcons();
+            }
+            document.getElementById('play-pause-container').style.opacity = isPlaying ? "0.05" : "0.3";
+            document.querySelectorAll('.station-title').forEach((title, i) => {
+                title.classList.toggle('active-glow', isPlaying && i === currentIndex);
+            });
+        }
+
+        function bindEvents() {
+            masterBtn.addEventListener('click', (e) => {
+                if (!swipeDetected) togglePlay();
+            });
+
+            let startX = 0;
+            let swipeDetected = false;
+
+            document.addEventListener('touchstart', (e) => {
+                startX = e.touches[0].clientX;
+                swipeDetected = false;
+            }, { passive: true });
+
+            document.addEventListener('touchmove', (e) => {
+                const dx = startX - e.touches[0].clientX;
+                if (Math.abs(dx) > 10) swipeDetected = true;
+            }, { passive: true });
+
+            document.addEventListener('touchend', (e) => {
+                const dx = startX - e.changedTouches[0].clientX;
+                if (Math.abs(dx) > 70) { 
+                    swipeDetected = true;
+                    if (dx > 0) nextStation(); else prevStation(); 
+                }
+            }, { passive: true });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+                    e.preventDefault();
+                    if (seekBy(e.code === 'ArrowUp' ? seekStepSeconds : -seekStepSeconds)) return;
+                }
+                if (e.code === 'ArrowRight' || e.code === 'MediaTrackNext') nextStation();
+                if (e.code === 'ArrowLeft' || e.code === 'MediaTrackPrevious') prevStation();
+                if (e.code === 'Space') togglePlay();
+            });
+
+            player.onstalled = () => {
+                spinner.classList.remove('hidden');
+                scheduleReconnect('stalled');
+            };
+            player.onwaiting = () => {
+                spinner.classList.remove('hidden');
+                clearWaitingWatchdog();
+                waitingWatchdogTimer = setTimeout(() => scheduleReconnect('buffer-timeout', true), 8000);
+            };
+            player.onplaying = () => {
+                log("Live");
+                spinner.classList.add('hidden');
+                isPlaying = true;
+                resetReconnectState();
+                updateUI();
+            };
+            player.onpause = () => {
+                persistStationProgress(stations[currentIndex]);
+                log("Paused");
+                spinner.classList.add('hidden');
+                isPlaying = false;
+                clearReconnectTimer();
+                clearWaitingWatchdog();
+                updateUI();
+                updateEbookProgressUI();
+            };
+            player.onended = () => {
+                const station = stations[currentIndex];
+                const endPosition = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : player.currentTime;
+                saveEbookProgress(station, endPosition);
+                isPlaying = false;
+                updateUI();
+                updateEbookProgressUI();
+                log("Playback Ended");
+            };
+            player.onerror = () => {
+                log("Stream Error");
+                spinner.classList.remove('hidden');
+                scheduleReconnect('media-error');
+            };
+            player.ontimeupdate = () => {
+                persistStationProgress(stations[currentIndex]);
+                updateEbookProgressUI();
+            };
+            player.onloadedmetadata = () => updateEbookProgressUI();
+            player.onseeked = () => updateEbookProgressUI();
+
+            window.addEventListener('pagehide', () => persistStationProgress(stations[currentIndex]));
+            window.addEventListener('offline', () => {
+                pendingNetworkRetry = true;
+                log("Offline");
+                spinner.classList.remove('hidden');
+            });
+            window.addEventListener('online', () => {
+                log("Online");
+                if (!isPlaying && !pendingNetworkRetry) {
+                    spinner.classList.add('hidden');
+                    return;
+                }
+                reconnectAttempts = 0;
+                pendingNetworkRetry = false;
+                syncStation();
+            });
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState !== 'visible' || !isPlaying) return;
+                if (player.paused || player.readyState < 2) {
+                    log("Refreshing Stream");
+                    syncStation();
+                }
+            });
+
+            document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+        }
+
+        initApp();
+    </script>
+</body>
+</html>
