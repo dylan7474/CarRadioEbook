@@ -164,15 +164,7 @@
     <audio id="radio-player" preload="none"></audio>
 
     <script>
-        const stations = [
-            { name: "Radio Paradise", url: "https://stream.radioparadise.com/mp3-128", type: 'mp3', color: 'text-blue-500', sub: 'Main Mix' },
-            { name: "RP Rock Mix", url: "https://stream.radioparadise.com/rock-128", type: 'mp3', color: 'text-red-600', sub: 'Paradise Rock' },
-            { name: "BBC Radio 4", url: "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio%3d96000.norewind.m3u8", type: 'hls', color: 'text-neutral-400', sub: 'BBC Culture' },
-            { name: "NPR (WNYC)", url: "https://fm939.wnyc.org/wnycfm", type: 'mp3', color: 'text-blue-400', sub: 'US News & Talk' }, 
-            { name: "BBC World", url: "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service", type: 'mp3', color: 'text-indigo-400', sub: 'World Service' },
-            { name: "YourClassical", url: "https://cms.stream.publicradio.org/cms.mp3", type: 'mp3', color: 'text-amber-500', sub: 'Classical Focus' }, 
-            { name: "C-SPAN Radio", url: "https://playerservices.streamtheworld.com/api/livestream-redirect/CSPANRADIO.mp3", type: 'mp3', color: 'text-red-500', sub: 'Politics' } 
-        ];
+        let stations = [];
 
         let currentIndex = 0;
         let isPlaying = false;
@@ -199,6 +191,14 @@
         const ebookProgressPanel = document.getElementById('ebook-progress');
         const ebookProgressLabel = document.getElementById('ebook-progress-label');
         const ebookProgressFill = document.getElementById('ebook-progress-fill');
+
+        async function loadStations() {
+            const response = await fetch('/api/streams');
+            if (!response.ok) throw new Error('stream config unavailable');
+            const data = await response.json();
+            if (!Array.isArray(data) || data.length === 0) throw new Error('stream config empty');
+            return data;
+        }
 
         function log(msg) {
             debugLog.innerText = msg;
@@ -246,6 +246,14 @@
         }
 
         async function initApp() {
+            try {
+                stations = await loadStations();
+                log(`Loaded ${stations.length} streams`);
+            } catch (e) {
+                log("Stream Config Failed");
+                stations = [];
+            }
+
             log("Fetching ebooks...");
             try {
                 const res = await fetch('/api/ebooks');
@@ -263,6 +271,14 @@
                     });
                 }
             } catch (e) { log("Ebook Scan Failed"); }
+
+            if (stations.length === 0) {
+                btStatus.innerText = 'No Streams Configured';
+                debugLog.innerText = 'Open /admin.html to add streams';
+                statusDot.className = "w-2 h-2 rounded-full bg-red-500";
+                spinner.classList.add('hidden');
+                return;
+            }
 
             renderApp();
             bindEvents();

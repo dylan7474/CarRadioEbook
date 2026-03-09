@@ -12,11 +12,12 @@ The UI is optimized for in-car or kiosk-style use:
 
 The app provides a single-page listening experience with two content sources:
 
-1. **Built-in radio stations** (music, news, talk, and classical streams).
+1. **Configured radio stations** loaded from `streams.json` (editable via `admin.html`).
 2. **Scanned local MP3 content** exposed as additional “stations” via `/api/ebooks`.
 
 When deployed with the included `deploy.sh` flow, a lightweight Node server is generated to:
 - serve the static app
+- expose radio stream config via `/api/streams` (GET/POST)
 - expose ebook metadata from mounted media folders
 - stream MP3 files (including range request support)
 - store and serve ebook playback position via `/api/ebook-progress` for cross-device resume
@@ -44,6 +45,22 @@ On supported devices/browsers, lock-screen and hardware media controls are wired
 - Seek backward (rewind audiobook stations)
 - Seek forward (fast-forward audiobook stations)
 
+
+
+## Stream configuration admin
+
+Radio streams are now stored in `streams.json` instead of being hardcoded in `index.html`.
+
+- Open `/admin.html` to add, edit, or delete stream entries.
+- Click **Save Changes** to write updates through `/api/streams`.
+- Reload the main player after saving so it picks up the latest stream list.
+
+Each stream entry supports:
+- `name`: display title
+- `url`: stream URL
+- `type`: `mp3` or `hls`
+- `color`: Tailwind text color class for the station title
+- `sub`: subtitle/descriptor shown under the title
 
 ## Playback resilience
 

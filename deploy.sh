@@ -47,6 +47,7 @@ const { URL } = require('url');
 const PORT = Number(process.env.PORT) || 3011;
 const STATIC_ROOT = process.env.STATIC_ROOT || __dirname;
 const PROGRESS_FILE = path.join(STATIC_ROOT, 'ebook-progress.json');
+const STREAMS_FILE = path.join(STATIC_ROOT, 'streams.json');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -97,6 +98,21 @@ const writeProgressStore = (store) => {
 };
 
 
+const readStreamsStore = () => {
+  try {
+    if (!fs.existsSync(STREAMS_FILE)) return [];
+    const data = JSON.parse(fs.readFileSync(STREAMS_FILE, 'utf8'));
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    return [];
+  }
+};
+
+const writeStreamsStore = (streams) => {
+  fs.writeFileSync(STREAMS_FILE, JSON.stringify(streams, null, 2));
+};
+
+
 const serveStatic = (req, res, url) => {
   // 1. Handle API requests
   if (url.pathname === '/api/ebooks') {
@@ -104,6 +120,57 @@ const serveStatic = (req, res, url) => {
     const ebooks = getEbooks(ebookPath, ebookPath);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(ebooks));
+    return;
+  }
+
+
+  if (url.pathname === '/api/streams' && req.method === 'GET') {
+    const streams = readStreamsStore();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(streams));
+    return;
+  }
+
+  if (url.pathname === '/api/streams' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1024 * 128) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '[]');
+        if (!Array.isArray(payload)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Payload must be an array' }));
+          return;
+        }
+
+        const streams = payload
+          .filter(item => item && typeof item === 'object')
+          .map(item => ({
+            name: String(item.name || '').trim(),
+            url: String(item.url || '').trim(),
+            type: String(item.type || 'mp3').trim().toLowerCase() === 'hls' ? 'hls' : 'mp3',
+            color: String(item.color || 'text-blue-500').trim() || 'text-blue-500',
+            sub: String(item.sub || '').trim()
+          }))
+          .filter(item => item.name && item.url);
+
+        if (!streams.length) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'At least one stream is required' }));
+          return;
+        }
+
+        writeStreamsStore(streams);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, count: streams.length }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Malformed JSON payload' }));
+      }
+    });
     return;
   }
 
@@ -213,7 +280,7 @@ echo "Generating Dockerfile..."
 cat <<DOCKER_EOF > Dockerfile
 FROM node:20-slim
 WORKDIR /app
-COPY index.html legacy.html server.js ./
+COPY index.html admin.html legacy.html streams.json server.js ./
 RUN mkdir -p /app/ebooks && echo '{}' > /app/ebook-progress.json
 EXPOSE ${PORT_ARG}
 ENV PORT=${PORT_ARG}
