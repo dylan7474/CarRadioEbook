@@ -213,7 +213,7 @@ echo "Generating Dockerfile..."
 cat <<DOCKER_EOF > Dockerfile
 FROM node:20-slim
 WORKDIR /app
-COPY index.html server.js ./
+COPY index.html legacy.html server.js ./
 RUN mkdir -p /app/ebooks && echo '{}' > /app/ebook-progress.json
 EXPOSE ${PORT_ARG}
 ENV PORT=${PORT_ARG}
